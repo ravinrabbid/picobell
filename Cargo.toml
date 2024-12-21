@@ -18,9 +18,29 @@ embedded-storage = "0.3.1"
 
 cortex-m-rt = "0.7.5"
 
-embassy-executor = { version = "0.6", features = ["task-arena-size-1024", "arch-cortex-m", "executor-thread", "defmt", "integrated-timers", "executor-interrupt"] }
+embassy-executor = { version = "0.6", features = [
+    "task-arena-size-1024",
+    "arch-cortex-m",
+    "executor-thread",
+    "defmt",
+    "integrated-timers",
+    "executor-interrupt",
+] }
 embassy-sync = { version = "0.6" }
-embassy-time = { version = "0.3", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-time = { version = "0.3", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
+embassy-futures = { version = "0.1" }
 
 cortex-m = { version = "0.7.7" }
-embassy-rp = { version = "0.2", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl"] }
+embassy-rp = { version = "0.2", features = [
+    "defmt",
+    "unstable-pac",
+    "time-driver",
+    "critical-section-impl",
+] }
+
+pio-proc = { version = "0.2" }
+pio = { version = "0.2.1" }
+fixed = { version = "1.28" }
