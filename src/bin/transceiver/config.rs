@@ -14,8 +14,9 @@ pub const BUTTON_ACTIVE_LEVEL: Level = Level::Low;
 pub const BELL_TRIGGER_DURATION: Duration = Duration::from_millis(100);
 pub const BELL_ACTIVE_LEVEL: Level = Level::High;
 
-pub const LED_COUNT: usize = 8;
+pub const LED_COUNT: usize = 4;
 pub const LED_CONFIG: leds::Config = leds::Config {
+    blink_count: 7,
     countdown_duration: Duration::from_secs(30),
     color_alert_normal: colors::BLUE,
     color_alert_high1: colors::YELLOW,

@@ -57,6 +57,8 @@ async fn button_task(r: ButtonResources) {
     info!("Button task started");
 
     let frame = Frame {
+        alert: pio_honeywell::AlertType::High1,
+        low_battery: false,
         ..Default::default()
     };
 
@@ -102,9 +104,9 @@ async fn leds_task(r: LedsResources) {
     info!("Leds task started");
 
     loop {
-        match select(receiver.changed(), leds.tick()).await {
+        match select(receiver.changed(), leds.show()).await {
             Either::First(frame) => leds.update(frame),
-            Either::Second(_) => (),
+            Either::Second(_) => leds.update(receiver.changed().await),
         }
     }
 }
