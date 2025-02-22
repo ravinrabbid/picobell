@@ -3,7 +3,7 @@
 
 use bell::Bell;
 use button::Button;
-use config::{AssignedResources, BellResources, ButtonResources, LedsResources};
+use config::{AssignedResources, BellResources, ButtonResources, LedsResources, RfRessources};
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
@@ -42,22 +42,20 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(bell_task(r.bell)));
     unwrap!(spawner.spawn(leds_task(r.leds)));
 
+    let _rf = r.rf;
+
     info!("Picobell ready");
 }
 
 #[embassy_executor::task]
 async fn button_task(r: ButtonResources) {
-    let mut button = Button::new(
-        r.pin,
-        config::BUTTON_DEBOUNCE_DELAY,
-        config::BUTTON_ACTIVE_LEVEL,
-    );
+    let mut button = Button::new(r.pin, config::BUTTON_CONFIG);
     let sender = TRIGGER_WATCH.sender();
 
     info!("Button task started");
 
     let frame = Frame {
-        alert: pio_honeywell::AlertType::High1,
+        alert: pio_honeywell::AlertType::High2,
         low_battery: false,
         ..Default::default()
     };
@@ -75,11 +73,7 @@ async fn button_task(r: ButtonResources) {
 
 #[embassy_executor::task]
 async fn bell_task(r: BellResources) {
-    let mut bell = Bell::new(
-        r.pin,
-        config::BELL_TRIGGER_DURATION,
-        config::BELL_ACTIVE_LEVEL,
-    );
+    let mut bell = Bell::new(r.pin, config::BELL_CONFIG);
     let mut receiver = unwrap!(TRIGGER_WATCH.receiver());
 
     info!("Bell task started");
