@@ -4,6 +4,10 @@ use embassy_rp::peripherals;
 use embassy_time::Duration;
 use picobell::{bell, button, leds};
 use smart_leds::colors;
+use arbitrary_int::u20;
+
+pub const SEND_ID: u20 = u20::new(0xb2e4e);
+pub const RECEIVE_ID: u20 = u20::new(0xb2e4e);
 
 pub const TRIGGER_COOLDOWN: Duration = Duration::from_secs(5);
 

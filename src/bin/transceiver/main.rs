@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use arbitrary_int::u20;
 use bell::Bell;
 use button::Button;
 use config::{AssignedResources, BellResources, ButtonResources, LedsResources, RfRessources};
@@ -68,7 +69,12 @@ async fn rf_task(r: RfRessources, mut pio: PIO0) {
                 honeywell.write_frame(&frame).await;
             }
             Either::Second(Ok(frame)) => {
-                tx_watch.send(frame);
+                if frame.id == config::RECEIVE_ID
+                    || frame.id == u20::new(0)
+                    || config::RECEIVE_ID == u20::new(0)
+                {
+                    tx_watch.send(frame);
+                }
             }
             Either::Second(Err(e)) => {
                 warn!("Receive error: {}", e);
@@ -86,7 +92,8 @@ async fn button_task(r: ButtonResources) {
 
     // TODO config
     let frame = Frame {
-        alert: pio_honeywell::AlertType::High2,
+        id: config::SEND_ID,
+        alert: pio_honeywell::AlertType::Normal,
         low_battery: false,
         ..Default::default()
     };
