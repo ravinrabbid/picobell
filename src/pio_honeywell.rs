@@ -40,7 +40,7 @@ pub trait Deserialize {
     fn deserialize(&self) -> Result<Frame, Error>;
 }
 
-#[derive(Format, Debug, Clone, Copy)]
+#[derive(Format, Debug, Clone, Copy, PartialEq)]
 pub enum DeviceType {
     PirMotionSensor = 1,
     Doorbell = 2,
@@ -58,7 +58,7 @@ impl TryFrom<u8> for DeviceType {
     }
 }
 
-#[derive(Format, Debug, Clone, Copy)]
+#[derive(Format, Debug, Clone, Copy, PartialEq)]
 pub enum AlertType {
     Normal = 0,
     High1 = 1,
@@ -80,7 +80,7 @@ impl TryFrom<u8> for AlertType {
     }
 }
 
-#[derive(Format, Debug, Clone, Copy)]
+#[derive(Format, Debug, Clone, Copy, PartialEq)]
 pub struct Frame {
     pub id: u20,
     pub device_type: DeviceType,
@@ -368,23 +368,41 @@ impl<'a, PIO: Instance, const S: usize> PioHoneywell<'a, PIO, S> {
         self.mode = None;
     }
 
-    pub async fn read_frame(&mut self) -> Result<Frame, Error> {
+    pub async fn read_frame(&mut self) -> Frame {
         self.start(Mode::Rx);
 
         let mut bytes = [0u8; 6];
+        let mut repetitions = 0;
+        let mut current_frame = Frame::default();
 
-        // Pre-load bit count - 1 to state machine
-        self.sm
-            .tx()
-            .wait_push(((bytes.len() as u32 * u8::BITS) - 1) as u32)
-            .await;
+        // Expect at 3 consecutive equal frames
+        loop {
+            // Pre-load bit count - 1 to state machine
+            self.sm
+                .tx()
+                .wait_push(((bytes.len() as u32 * u8::BITS) - 1) as u32)
+                .await;
 
-        for byte in bytes.iter_mut() {
-            *byte = self.sm.rx().wait_pull().await as u8;
-            debug!("Read word {=u8:#x}", byte);
+            for byte in bytes.iter_mut() {
+                *byte = self.sm.rx().wait_pull().await as u8;
+                debug!("Read word {=u8:#x}", byte);
+            }
+
+            if let Ok(frame) = bytes.deserialize() {
+                if current_frame == frame {
+                    repetitions += 1;
+                } else {
+                    current_frame = frame;
+                    repetitions = 1;
+                }
+            } else {
+                repetitions = 0;
+            }
+
+            if repetitions >= 3 {
+                return current_frame;
+            }
         }
-
-        bytes.deserialize()
     }
 
     pub async fn write_frame(&mut self, frame: &Frame) {

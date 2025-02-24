@@ -68,16 +68,13 @@ async fn rf_task(r: RfRessources, mut pio: PIO0) {
             Either::First(frame) => {
                 honeywell.write_frame(&frame).await;
             }
-            Either::Second(Ok(frame)) => {
+            Either::Second(frame) => {
                 if frame.id == config::RECEIVE_ID
                     || frame.id == u20::new(0)
                     || config::RECEIVE_ID == u20::new(0)
                 {
                     tx_watch.send(frame);
                 }
-            }
-            Either::Second(Err(e)) => {
-                warn!("Receive error: {}", e);
             }
         }
     }
