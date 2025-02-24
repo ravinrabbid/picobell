@@ -21,6 +21,7 @@ pub const LED_COUNT: usize = 12;
 pub const LED_CONFIG: leds::Config = leds::Config {
     blink_count: 7,
     countdown_duration: Duration::from_secs(30),
+    color_button_press: colors::WHITE,
     color_alert_normal: colors::BLUE,
     color_alert_high1: colors::YELLOW,
     color_alert_high2: colors::ORANGE,
@@ -36,8 +37,6 @@ assign_resources! {
         pin: PIN_0,
     },
     leds: LedsResources {
-        pio: PIO1,
-        dma: DMA_CH1,
         pin: PIN_26,
     },
     rf: RfRessources {

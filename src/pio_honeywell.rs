@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use embassy_rp::gpio::Level;
 use embassy_rp::pio::{
-    Common, Config, Direction, FifoJoin, Instance, LoadedProgram, PioPin, ShiftConfig,
+    Common, Config, Direction, FifoJoin, Instance, LoadedProgram, Pin, PioPin, ShiftConfig,
     ShiftDirection, StateMachine,
 };
 
@@ -213,53 +213,6 @@ impl<'a, PIO: Instance> PioHoneywellTxProgram<'a, PIO> {
     }
 }
 
-pub struct PioHoneywellTx<'a, PIO: Instance, const S: usize> {
-    sm: StateMachine<'a, PIO, S>,
-}
-
-impl<'a, PIO: Instance, const S: usize> PioHoneywellTx<'a, PIO, S> {
-    pub fn new(
-        common: &mut Common<'a, PIO>,
-        mut sm: StateMachine<'a, PIO, S>,
-        data_pin: impl PioPin,
-        clk_pin: impl PioPin,
-        program: &PioHoneywellTxProgram<'a, PIO>,
-    ) -> Self {
-        let data_pin = common.make_pio_pin(data_pin);
-        let clk_pin = common.make_pio_pin(clk_pin);
-
-        let mut cfg = Config::default();
-        cfg.use_program(&program.prg, &[&data_pin]);
-        cfg.set_in_pins(&[&clk_pin]);
-        cfg.clock_divider = 1.to_fixed();
-        cfg.shift_out = ShiftConfig {
-            threshold: 8,
-            direction: ShiftDirection::Left,
-            auto_fill: false,
-        };
-        cfg.fifo_join = FifoJoin::TxOnly;
-
-        sm.set_config(&cfg);
-
-        sm.set_pins(Level::Low, &[&data_pin]);
-        sm.set_pin_dirs(Direction::Out, &[&data_pin]);
-        sm.set_pin_dirs(Direction::In, &[&clk_pin]);
-
-        sm.set_enable(true);
-
-        Self { sm }
-    }
-
-    pub async fn write_frame(&mut self, frame: &Frame) {
-        //TODO dma?
-
-        for byte in frame.serialize().iter() {
-            debug!("Writing byte {=u8:#x}", byte);
-            self.sm.tx().wait_push((*byte as u32) << 24).await;
-        }
-    }
-}
-
 pub struct PioHoneywellRxProgram<'a, PIO: Instance> {
     prg: LoadedProgram<'a, PIO>,
 }
@@ -319,48 +272,105 @@ impl<'a, PIO: Instance> PioHoneywellRxProgram<'a, PIO> {
     }
 }
 
-pub struct PioHoneywellRx<'a, PIO: Instance, const S: usize> {
-    sm: StateMachine<'a, PIO, S>,
+#[derive(Format, Debug, Clone, Copy, PartialEq)]
+pub enum Mode {
+    Rx,
+    Tx,
 }
 
-impl<'a, PIO: Instance, const S: usize> PioHoneywellRx<'a, PIO, S> {
+pub struct PioHoneywell<'a, PIO: Instance, const S: usize> {
+    data_pin: Pin<'a, PIO>,
+    clk_pin: Pin<'a, PIO>,
+    sm: StateMachine<'a, PIO, S>,
+    rx_prg: PioHoneywellRxProgram<'a, PIO>,
+    tx_prg: PioHoneywellTxProgram<'a, PIO>,
+    mode: Option<Mode>,
+}
+
+impl<'a, PIO: Instance, const S: usize> PioHoneywell<'a, PIO, S> {
     pub fn new(
         common: &mut Common<'a, PIO>,
-        mut sm: StateMachine<'a, PIO, S>,
+        sm: StateMachine<'a, PIO, S>,
         data_pin: impl PioPin,
         clk_pin: impl PioPin,
-        program: &PioHoneywellRxProgram<'a, PIO>,
     ) -> Self {
         let data_pin = common.make_pio_pin(data_pin);
         let clk_pin = common.make_pio_pin(clk_pin);
 
+        Self {
+            data_pin,
+            clk_pin,
+            sm,
+            rx_prg: PioHoneywellRxProgram::new(common),
+            tx_prg: PioHoneywellTxProgram::new(common),
+            mode: None,
+        }
+    }
+
+    fn start(&mut self, mode: Mode) {
+        if Some(mode) == self.mode {
+            return;
+        }
+
+        self.stop_and_reset();
+
         let mut cfg = Config::default();
-        cfg.use_program(&program.prg, &[]);
-        cfg.set_in_pins(&[&data_pin, &clk_pin]);
-        cfg.set_jmp_pin(&data_pin);
-        cfg.clock_divider = 1.to_fixed();
-        cfg.shift_in = ShiftConfig {
-            threshold: 8,
-            direction: ShiftDirection::Left,
-            auto_fill: true,
-        };
-        cfg.shift_out = ShiftConfig {
-            threshold: 32,
-            direction: ShiftDirection::Left,
-            auto_fill: false,
-        };
-        cfg.fifo_join = FifoJoin::Duplex;
 
-        sm.set_config(&cfg);
+        match mode {
+            Mode::Rx => {
+                cfg.use_program(&self.rx_prg.prg, &[]);
+                cfg.set_in_pins(&[&self.data_pin, &self.clk_pin]);
+                cfg.set_jmp_pin(&self.data_pin);
+                cfg.clock_divider = 1.to_fixed();
+                cfg.shift_in = ShiftConfig {
+                    threshold: 8,
+                    direction: ShiftDirection::Left,
+                    auto_fill: true,
+                };
+                cfg.shift_out = ShiftConfig {
+                    threshold: 32,
+                    direction: ShiftDirection::Left,
+                    auto_fill: false,
+                };
+                cfg.fifo_join = FifoJoin::Duplex;
 
-        sm.set_pin_dirs(Direction::In, &[&data_pin, &clk_pin]);
+                self.sm
+                    .set_pin_dirs(Direction::In, &[&self.data_pin, &self.clk_pin]);
+            }
+            Mode::Tx => {
+                cfg.use_program(&self.tx_prg.prg, &[&self.data_pin]);
+                cfg.set_in_pins(&[&self.clk_pin]);
+                cfg.clock_divider = 1.to_fixed();
+                cfg.shift_out = ShiftConfig {
+                    threshold: 8,
+                    direction: ShiftDirection::Left,
+                    auto_fill: false,
+                };
+                cfg.fifo_join = FifoJoin::TxOnly;
 
-        sm.set_enable(true);
+                self.sm.set_pins(Level::Low, &[&self.data_pin]);
+                self.sm.set_pin_dirs(Direction::Out, &[&self.data_pin]);
+                self.sm.set_pin_dirs(Direction::In, &[&self.clk_pin]);
+            }
+        }
 
-        Self { sm }
+        self.sm.set_config(&cfg);
+        self.sm.set_enable(true);
+
+        self.mode = Some(mode);
+    }
+
+    pub fn stop_and_reset(&mut self) {
+        self.sm.set_enable(false);
+        self.sm.clear_fifos();
+        self.sm.restart();
+
+        self.mode = None;
     }
 
     pub async fn read_frame(&mut self) -> Result<Frame, Error> {
+        self.start(Mode::Rx);
+
         let mut bytes = [0u8; 6];
 
         // Pre-load bit count - 1 to state machine
@@ -375,5 +385,14 @@ impl<'a, PIO: Instance, const S: usize> PioHoneywellRx<'a, PIO, S> {
         }
 
         bytes.deserialize()
+    }
+
+    pub async fn write_frame(&mut self, frame: &Frame) {
+        self.start(Mode::Tx);
+
+        for byte in frame.serialize().iter() {
+            debug!("Writing byte {=u8:#x}", byte);
+            self.sm.tx().wait_push((*byte as u32) << 24).await;
+        }
     }
 }

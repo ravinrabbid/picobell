@@ -3,7 +3,7 @@ use embassy_rp::pio::{Common, Instance, PioPin, StateMachine};
 use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
 use embassy_rp::Peripheral;
 use embassy_time::{Duration, Timer};
-use smart_leds::RGB8;
+use smart_leds::{RGB, RGB8};
 
 use crate::pio_honeywell::{AlertType, Frame};
 
@@ -12,6 +12,7 @@ pub struct Config {
 
     pub countdown_duration: Duration,
 
+    pub color_button_press: RGB8,
     pub color_alert_normal: RGB8,
     pub color_alert_high1: RGB8,
     pub color_alert_high2: RGB8,
@@ -19,10 +20,15 @@ pub struct Config {
     pub color_low_battery: RGB8,
 }
 
+pub enum Mode {
+    Frame(Frame),
+    ButtonPress,
+}
+
 pub struct Leds<'d, PIO: Instance, const S: usize, const N: usize> {
     ws2812: PioWs2812<'d, PIO, S, N>,
     config: Config,
-    current_frame: Option<Frame>,
+    current_mode: Option<Mode>,
 }
 
 impl<'d, PIO: Instance, const S: usize, const N: usize> Leds<'d, PIO, S, N> {
@@ -39,24 +45,24 @@ impl<'d, PIO: Instance, const S: usize, const N: usize> Leds<'d, PIO, S, N> {
         Self {
             ws2812,
             config,
-            current_frame: None,
+            current_mode: None,
         }
     }
 
-    pub fn update(&mut self, frame: Frame) {
-        self.current_frame = Some(frame);
+    pub fn update(&mut self, mode: Mode) {
+        self.current_mode = Some(mode);
     }
 
     pub async fn show(&mut self) {
-        let (color_on, color_off) = match self.current_frame {
-            Some(Frame {
+        let (color_on, color_off) = match self.current_mode {
+            Some(Mode::Frame(Frame {
                 id: _,
                 device_type: _,
                 alert,
                 secret_knock: _,
                 relay: _,
                 low_battery,
-            }) => (
+            })) => (
                 match alert {
                     AlertType::Normal => self.config.color_alert_normal,
                     AlertType::High1 => self.config.color_alert_high1,
@@ -69,6 +75,14 @@ impl<'d, PIO: Instance, const S: usize, const N: usize> Leds<'d, PIO, S, N> {
                     RGB8::default()
                 },
             ),
+            Some(Mode::ButtonPress) => {
+                self.ws2812
+                    .write(&[self.config.color_button_press; N])
+                    .await;
+                Timer::after(Duration::from_millis(500)).await;
+                self.ws2812.write(&[RGB::default(); N]).await;
+                return;
+            }
             None => {
                 self.ws2812.write(&[RGB8::default(); N]).await;
                 return;
