@@ -1,11 +1,15 @@
-use defmt::{debug, Format};
+use defmt::*;
 use embassy_rp::gpio::{Level, Output, Pin};
 use embassy_rp::spi::{Error as SpiError, Instance, Mode as SpiMode, Spi};
 use embassy_rp::Peripheral;
+use libm::{floor, log2, round};
 use thiserror::Error;
 
 const FXOSC: u64 = 26_000_000;
-static RXBW_VALUES: &'static [u32] = &[
+const MAX_DEVIATION: u64 = 380_160;
+const MAX_BITRATE: u64 = 1_621_826;
+
+static CHANBW_VALUES: &[u64] = &[
     58_000, 68_000, 81_000, 102_000, 116_000, 135_000, 162_000, 203_000, 232_000, 270_000, 325_000,
     406_000, 464_000, 541_000, 650_000, 812_000,
 ];
@@ -16,6 +20,8 @@ pub enum Error {
     Spi,
     #[error("Cannot write to write-only register.")]
     WriteOnly,
+    #[error("Target value exceeds maxmimum of {0}.")]
+    ValueToLarge(u64),
 }
 
 impl From<SpiError> for Error {
@@ -24,6 +30,7 @@ impl From<SpiError> for Error {
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq, PartialOrd)]
 pub enum Register {
     // Burst capable read/write registers
@@ -89,6 +96,9 @@ pub enum Register {
     RXBYTES = 0x3B,
     RCCTRL1_STATUS = 0x3C,
     RCCTRL0_STATUS = 0x3D,
+    // Multi byte registers
+    PATABLE = 0x3E,
+    TX_RX_FIFO = 0x3F,
 }
 
 #[derive(PartialEq, PartialOrd)]
@@ -108,13 +118,14 @@ pub enum StrobeRegister {
     SNOP = 0x3D,
 }
 
+#[derive(Format)]
 pub enum Mode {
     Idle,
     Rx,
     Tx,
 }
 
-struct Cc1101<'d, SPI: Instance, M: SpiMode> {
+pub struct Cc1101<'d, SPI: Instance, M: SpiMode> {
     spi: Spi<'d, SPI, M>,
     cs: Output<'d>,
 }
@@ -145,7 +156,7 @@ impl<'d, SPI: Instance, M: SpiMode> Cc1101<'d, SPI, M> {
     }
 
     pub fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Error> {
-        if reg >= Register::PARTNUM {
+        if reg >= Register::PARTNUM && reg <= Register::RCCTRL0_STATUS {
             return Err(Error::WriteOnly);
         }
 
@@ -197,8 +208,14 @@ impl<'d, SPI: Instance, M: SpiMode> Cc1101<'d, SPI, M> {
 
         match mode {
             Mode::Idle => self.strobe_register(StrobeRegister::SIDLE),
-            Mode::Rx => self.strobe_register(StrobeRegister::SRX),
-            Mode::Tx => self.strobe_register(StrobeRegister::STX),
+            Mode::Rx => {
+                self.set_mode(Mode::Idle)?;
+                self.strobe_register(StrobeRegister::SRX)
+            }
+            Mode::Tx => {
+                self.set_mode(Mode::Idle)?;
+                self.strobe_register(StrobeRegister::STX)
+            }
         }?;
 
         // Wait until state reached
@@ -215,107 +232,101 @@ impl<'d, SPI: Instance, M: SpiMode> Cc1101<'d, SPI, M> {
         Ok(())
     }
 
-    pub fn set_frequency(&mut self, hz: u64) {
+    pub fn set_frequency(&mut self, hz: u64) -> Result<(), Error> {
         let freq = hz * 1u64.rotate_left(16) / FXOSC;
         let freq0 = (freq & 0xff) as u8;
         let freq1 = ((freq >> 8) & 0xff) as u8;
         let freq2 = ((freq >> 16) & 0xff) as u8;
 
-        debug!("Changing frequency to {=u64}Hz", freq);
+        debug!("Setting frequency to {=u64}Hz", freq);
 
-        self.write_register(Register::FREQ2, freq2);
-        self.write_register(Register::FREQ1, freq1);
-        self.write_register(Register::FREQ0, freq0);
+        self.write_register(Register::FREQ2, freq2)?;
+        self.write_register(Register::FREQ1, freq1)?;
+        self.write_register(Register::FREQ0, freq0)
     }
 
-    // TODO
-    //...
+    /// Calculate exponent and mantissa register values accoring to datasheet p.35.
+    ///
+    /// This can be used for deviation, data rate and channel spacing.
+    fn calculate_exponent_and_mantissa(
+        target: u64,
+        mantissa_offset_exponent: u8,
+        divisor_exponent: u8,
+    ) -> (u8, u8) {
+        let e = floor(log2(
+            (target * (1 << (divisor_exponent - mantissa_offset_exponent))) as f64 / FXOSC as f64,
+        )) as u8;
+        let m = round(
+            (target * (1 << divisor_exponent) as u64) as f64 / ((FXOSC * (1 << e) as u64) as f64)
+                - (1 << mantissa_offset_exponent) as f64,
+        ) as u16;
 
-    pub fn set_deviation(&mut self, hz: u64) {
-        let target = hz / (FXOSC / (1 << 17));
+        if m >= (1 << mantissa_offset_exponent) {
+            (e + 1, 0)
+        } else {
+            (e, m as u8)
+        }
+    }
 
-        let origin = (8 * FXOSC) / (1 << 17);
-
-        let mut exponent = 7; // max
-        let mut mantissa = 0;
-
-        while exponent >= 0 {
-            let interval_start = (1 << exponent) * origin;
-
-            if hz >= interval_start {
-                let step_size = interval_start / 8;
-
-                mantissa = (hz - interval_start) / step_size;
-
-                break;
-            }
-
-            exponent -= 1;
+    pub fn set_deviation(&mut self, hz: u64) -> Result<(), Error> {
+        if hz > MAX_DEVIATION {
+            return Err(Error::ValueToLarge(MAX_DEVIATION));
         }
 
-        info!("Deviation Exp: {} Mant: {}", exponent, mantissa);
+        let (e, m) = Self::calculate_exponent_and_mantissa(hz, 3, 17);
 
-        self.write_register(
-            0x15,
-            (((exponent & 0x7) as u8) << 4) | ((mantissa & 0x7) as u8),
+        debug!(
+            "Setting deviation to {=u64}Hz (Eponnent: {=u8}, Mantissa: {=u8})",
+            hz, e, m
         );
+
+        self.write_register(Register::DEVIATN, ((e & 0x7) << 4) | (m & 0x7))
     }
 
-    pub fn calculate_rx_bandwidth(&self, freq: u64, bitrate: u64) -> u32 {
-        // Uncertainty ~ +/- 40ppm for a cheap CC1101
-        // Uncertainty * 2 for both transmitter and receiver
-        let uncertainty = ((freq as f64 / 1_000_000.) * 40. * 2.) as u64;
-        let minbw = bitrate + uncertainty;
+    pub fn set_bitrate(&mut self, bitrate: u64) -> Result<(), Error> {
+        if bitrate > MAX_BITRATE {
+            return Err(Error::ValueToLarge(MAX_BITRATE));
+        }
 
-        for &val in RXBW_VALUES {
-            if val as u64 > minbw {
-                return val;
+        let (e, m) = Self::calculate_exponent_and_mantissa(bitrate, 8, 28);
+
+        debug!(
+            "Setting bitrate to {=u64}baud (Eponnent: {=u8}, Mantissa: {=u8})",
+            bitrate, e, m
+        );
+
+        let current = self.read_register(Register::MDMCFG4)?;
+        self.write_register(Register::MDMCFG4, e | (current & 0xF0))?;
+        self.write_register(Register::MDMCFG3, m)
+    }
+
+    pub fn set_channel_bandwidth(&mut self, hz: u64) -> Result<(), Error> {
+        for (idx, &bandwidth) in CHANBW_VALUES.iter().enumerate() {
+            if hz <= bandwidth {
+                let e = (((CHANBW_VALUES.len() - 1) - idx) / 4) as u8;
+                let m = (((CHANBW_VALUES.len() - 1) - idx) % 4) as u8;
+
+                debug!(
+                    "Setting channel bandwidth to {=u64}Hz (Eponnent: {=u8}, Mantissa: {=u8})",
+                    hz, e, m
+                );
+
+                let current = self.read_register(Register::MDMCFG4)?;
+                return self
+                    .write_register(Register::MDMCFG4, ((e << 6) | (m << 4)) | (current & 0x0F));
             }
         }
 
-        0
+        Err(Error::ValueToLarge(
+            *CHANBW_VALUES
+                .last()
+                .expect("CHANBW_VALUES is static non-empty"),
+        ))
     }
 
-    pub fn set_rx_bandwidth(&mut self, hz: u32) {
-        info!("RxBw {}", hz);
-        for e in (0..4).rev() {
-            for m in (0..4).rev() {
-                let point = FXOSC as i64 / (8 * (m + 4) * (1 << e));
+    pub fn set_frequency_offset(&mut self, hz: i64) -> Result<(), Error> {
+        let offset = hz / (FXOSC / (1 << 14)) as i64;
 
-                if (hz as i64 - point).abs() <= 1000 {
-                    info!("RxBw {} Exp: {} Mant: {}", hz, e, m);
-                    let current = self.read_register(0x10);
-                    self.write_register(0x10, (((e << 6) | (m << 4)) as u8) | (current & 0x0F))
-                }
-            }
-        }
-    }
-
-    pub fn set_bitrate(&mut self, bitrate: u64) {
-        // TODO imprecise
-        let origin = (256 * FXOSC) / (1 << 28);
-
-        let mut exponent = 14; // max
-        let mut mantissa = 0;
-
-        while exponent >= 0 {
-            let interval_start = (1 << exponent) * origin;
-
-            if bitrate >= interval_start {
-                let step_size = interval_start / 256;
-
-                mantissa = (bitrate - interval_start) / step_size;
-
-                break;
-            }
-
-            exponent -= 1;
-        }
-
-        info!("Bitrate Exp: {} Mant: {}", exponent, mantissa);
-
-        let current = self.read_register(0x10);
-        self.write_register(0x10, exponent as u8 | (current & 0xF0));
-        self.write_register(0x11, mantissa as u8);
+        self.write_register(Register::FSCTRL0, offset as u8)
     }
 }

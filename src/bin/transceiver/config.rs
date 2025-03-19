@@ -1,29 +1,40 @@
+use arbitrary_int::u20;
 use assign_resources::assign_resources;
 use embassy_rp::gpio::Level;
 use embassy_rp::peripherals;
 use embassy_time::Duration;
 use picobell::{bell, button, leds};
 use smart_leds::colors;
-use arbitrary_int::u20;
 
+/// Device ID to send packets with
 pub const SEND_ID: u20 = u20::new(0xb2e4e);
+
+/// Device ID to receive packets from
 pub const RECEIVE_ID: u20 = u20::new(0xb2e4e);
 
-pub const TRIGGER_COOLDOWN: Duration = Duration::from_secs(5);
+/// Frequency offset to compensate inaccuracies of the cc1101's crystal
+pub const FREQENCY_OFFSET: i64 = 89_000; // +/- 202_000Hz
 
+/// Delay after which button can be pressed or packet can be received again
+pub const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
+
+/// Configuration for button behaviour
 pub const BUTTON_CONFIG: button::Config = button::Config {
     debounce: Duration::from_millis(20),
     active: Level::Low,
 };
 
+/// Configuration for bell behaviour
 pub const BELL_CONFIG: bell::Config = bell::Config {
     delay: Duration::from_millis(100),
     active: Level::High,
 };
 
+/// Number of WS2812 leds attached
 pub const LED_COUNT: usize = 12;
+/// Configuration for led behaviour
 pub const LED_CONFIG: leds::Config = leds::Config {
-    blink_count: 7,
+    flash_count: 7,
     countdown_duration: Duration::from_secs(30),
     color_button_press: colors::WHITE,
     color_alert_normal: colors::BLUE,
@@ -33,6 +44,7 @@ pub const LED_CONFIG: leds::Config = leds::Config {
     color_low_battery: colors::RED,
 };
 
+// Pins to be used by the external devices
 assign_resources! {
     button: ButtonResources {
         pin: PIN_27,
