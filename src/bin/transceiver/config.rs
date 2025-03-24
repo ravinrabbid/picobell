@@ -7,10 +7,10 @@ use picobell::{bell, button, leds};
 use smart_leds::colors;
 
 /// Device ID to send packets with
-pub const SEND_ID: u20 = u20::new(0xb2e4e);
+pub const SEND_ID: u20 = u20::new(0x0affe);
 
 /// Device ID to receive packets from
-pub const RECEIVE_ID: u20 = u20::new(0xb2e4e);
+pub const RECEIVE_ID: u20 = u20::new(0x0affe);
 
 /// Frequency offset to compensate inaccuracies of the cc1101's crystal
 pub const FREQENCY_OFFSET: i64 = 89_000; // +/- 202_000Hz

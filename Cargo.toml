@@ -16,6 +16,7 @@ embedded-io = "0.6.1"
 embedded-io-async = "0.6.1"
 embedded-storage = "0.3.1"
 
+cortex-m = { version = "0.7.7" }
 cortex-m-rt = "0.7.5"
 
 embassy-executor = { version = "0.7", features = [
@@ -25,16 +26,6 @@ embassy-executor = { version = "0.7", features = [
     "defmt",
     "executor-interrupt",
 ] }
-embassy-sync = { version = "0.6" }
-embassy-time = { version = "0.4", features = [
-    "defmt",
-    "defmt-timestamp-uptime",
-] }
-embassy-futures = { version = "0.1" }
-embassy-usb-logger = { version = "0.4" }
-log = { version = "0.4" }
-
-cortex-m = { version = "0.7.7" }
 embassy-rp = { version = "0.3", features = [
     "defmt",
     "unstable-pac",
@@ -42,6 +33,12 @@ embassy-rp = { version = "0.3", features = [
     "critical-section-impl",
     "rp2040",
 ] }
+embassy-sync = { version = "0.6" }
+embassy-time = { version = "0.4", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
+embassy-futures = { version = "0.1" }
 
 pio-proc = { version = "0.2" }
 pio = { version = "0.2" }
@@ -51,7 +48,3 @@ thiserror = { version = "2", default-features = false }
 assign-resources = { version = "0.4" }
 smart-leds = { version = "0.4" }
 libm = { version = "0.2" }
-
-embassy-usb = { version = "0.4" }
-static_cell = { version = "2.1" }
-portable-atomic = { version = "1.5", features = ["critical-section"] }
