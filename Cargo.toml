@@ -4,6 +4,7 @@ name = "picobell"
 version = "0.1.0"
 authors = ["Frederik Walk <rust@walk.onl>"]
 resolver = "2"
+license-file = "LICENSE"
 
 [dependencies]
 defmt = "0.3"
