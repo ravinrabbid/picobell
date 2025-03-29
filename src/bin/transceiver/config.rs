@@ -24,6 +24,11 @@ pub const RECEIVE_ID: u20 = u20::new(0x0affe);
 /// Range is +/- 202_000Hz
 pub const FREQENCY_OFFSET: i64 = 89_000;
 
+/// Frequency to send/receive on
+///
+/// Must match the attached CC1101 module
+pub const FREQENCY: u64 = 868_300_000;
+
 /// Delay after which button can be pressed or packet can be received again
 pub const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
 

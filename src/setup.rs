@@ -30,6 +30,7 @@ pub fn setup_leds<'d, PIO: pio::Instance, const N: usize>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn setup_radio<'d, SPI: spi::Instance, PIO: pio::Instance>(
+    frequency: u64,
     frequency_offest: i64,
     spi: impl Peripheral<P = SPI> + 'd,
     spi_clk: impl spi::ClkPin<SPI>,
@@ -58,7 +59,7 @@ pub fn setup_radio<'d, SPI: spi::Instance, PIO: pio::Instance>(
         unwrap!(radio.read_register(cc1101::Register::VERSION))
     );
 
-    unwrap!(radio.set_frequency(868_300_000));
+    unwrap!(radio.set_frequency(frequency));
     unwrap!(radio.set_frequency_offset(frequency_offest));
     unwrap!(radio.set_deviation(50_000));
     unwrap!(radio.set_bitrate(6250));

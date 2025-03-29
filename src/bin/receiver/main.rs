@@ -49,6 +49,7 @@ async fn rf_task(r: RfRessources, pio: PIO0, spi: SPI0) {
     let rx_trigger_sender = RX_TRIGGER_WATCH.sender();
 
     let (mut radio, mut honeywell) = setup::setup_radio(
+        config::FREQENCY,
         config::FREQENCY_OFFSET,
         spi,
         r.clk,
