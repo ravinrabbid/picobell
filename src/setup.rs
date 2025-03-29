@@ -1,13 +1,54 @@
 use defmt::*;
+use embassy_rp::dma;
+use embassy_rp::gpio::Pin;
+use embassy_rp::interrupt::typelevel::Binding;
+use embassy_rp::pio;
+use embassy_rp::pio::Pio;
 use embassy_rp::spi;
+use embassy_rp::spi::Spi;
+use embassy_rp::Peripheral;
 
 use crate::cc1101;
 use crate::cc1101::Cc1101;
+use crate::leds;
+use crate::leds::Leds;
+use crate::pio_honeywell::PioHoneywell;
 
-pub fn setup_radio<SPI: spi::Instance, M: spi::Mode>(
-    radio: &mut Cc1101<SPI, M>,
+pub fn setup_leds<'d, PIO: pio::Instance, const N: usize>(
+    config: leds::Config,
+    pio: impl Peripheral<P = PIO> + 'd,
+    pio_interrupt: impl Binding<PIO::Interrupt, pio::InterruptHandler<PIO>>,
+    dma: impl Peripheral<P = impl dma::Channel> + 'd,
+    pin: impl pio::PioPin,
+) -> Leds<'d, PIO, 0, N> {
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(pio, pio_interrupt);
+
+    Leds::new(config, &mut common, sm0, dma, pin)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn setup_radio<'d, SPI: spi::Instance, PIO: pio::Instance>(
     frequency_offest: i64,
-) {
+    spi: impl Peripheral<P = SPI> + 'd,
+    spi_clk: impl spi::ClkPin<SPI>,
+    spi_mosi: impl spi::MosiPin<SPI>,
+    spi_miso: impl spi::MisoPin<SPI>,
+    spi_csn: impl Pin,
+    pio: impl Peripheral<P = PIO> + 'd,
+    pio_interrupt: impl Binding<PIO::Interrupt, pio::InterruptHandler<PIO>>,
+    serial_clk: impl pio::PioPin,
+    serial_data: impl pio::PioPin,
+) -> (Cc1101<'d, SPI, spi::Blocking>, PioHoneywell<'d, PIO, 0>) {
+    let Pio { common, sm0, .. } = Pio::new(pio, pio_interrupt);
+    let honeywell = PioHoneywell::new(common, sm0, serial_data, serial_clk);
+
+    let mut spi_config = spi::Config::default();
+    spi_config.frequency = 8_000_000;
+    let spi = Spi::new_blocking(spi, spi_clk, spi_mosi, spi_miso, spi_config);
+    let mut radio = Cc1101::new(spi, spi_csn);
+
     unwrap!(radio.reset());
     unwrap!(radio.wait_for_chip_ready());
     unwrap!(radio.set_mode(cc1101::Mode::Idle));
@@ -36,4 +77,6 @@ pub fn setup_radio<SPI: spi::Instance, M: spi::Mode>(
     unwrap!(radio.write_register(cc1101::Register::FREND1, 0x56)); // Defaults
     unwrap!(radio.write_register(cc1101::Register::FREND0, 0x10)); // Defaults
     unwrap!(radio.write_register(cc1101::Register::PATABLE, 0xC0)); // +12dBm (or 0xC5 +10dBm)
+
+    (radio, honeywell)
 }

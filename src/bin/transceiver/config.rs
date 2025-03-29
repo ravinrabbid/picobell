@@ -3,17 +3,26 @@ use assign_resources::assign_resources;
 use embassy_rp::gpio::Level;
 use embassy_rp::peripherals;
 use embassy_time::Duration;
-use picobell::{bell, button, leds};
+use picobell::{bell, button, leds, pio_honeywell::AlertType};
 use smart_leds::colors;
 
 /// Device ID to send packets with
+///
+/// Use 0x0 for broadcast
 pub const SEND_ID: u20 = u20::new(0x0affe);
 
+/// Alert Type to send
+pub const SEND_ALERT: AlertType = AlertType::Normal;
+
 /// Device ID to receive packets from
+///
+/// Use 0x0 to accept all IDs
 pub const RECEIVE_ID: u20 = u20::new(0x0affe);
 
 /// Frequency offset to compensate inaccuracies of the cc1101's crystal
-pub const FREQENCY_OFFSET: i64 = 89_000; // +/- 202_000Hz
+///
+/// Range is +/- 202_000Hz
+pub const FREQENCY_OFFSET: i64 = 89_000;
 
 /// Delay after which button can be pressed or packet can be received again
 pub const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);

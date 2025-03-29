@@ -2,8 +2,11 @@ use embassy_rp::gpio::{Drive, Level, Output, Pin};
 use embassy_rp::Peripheral;
 use embassy_time::{Duration, Timer};
 
+/// Configuration for the bell output
 pub struct Config {
+    /// How long the output will be set to active when triggered
     pub delay: Duration,
+    /// Logic level to set to output to when triggered
     pub active: Level,
 }
 

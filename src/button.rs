@@ -2,8 +2,11 @@ use embassy_rp::gpio::{Input, Level, Pin, Pull};
 use embassy_rp::Peripheral;
 use embassy_time::{Duration, Timer};
 
+/// Configuration for the button
 pub struct Config {
+    /// Debounce delay
     pub debounce: Duration,
+    /// Logic level for which the button is considered pressed
     pub active: Level,
 }
 

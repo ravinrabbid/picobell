@@ -2,7 +2,6 @@
 #![no_main]
 
 use arbitrary_int::u20;
-use cc1101::Cc1101;
 use config::{AssignedResources, BellResources, LedsResources, RfRessources};
 use defmt::*;
 use embassy_executor::Spawner;
@@ -10,18 +9,14 @@ use embassy_futures::select::{select, Either};
 use embassy_rp::bind_interrupts;
 use embassy_rp::peripherals::{DMA_CH1, PIO0, PIO1, SPI0};
 use embassy_rp::pio;
-use embassy_rp::pio::Pio;
-use embassy_rp::spi;
-use embassy_rp::spi::Spi;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::Timer;
-use leds::{Leds, Mode as LedMode};
-use pio_honeywell::{Frame, PioHoneywell};
+use pio_honeywell::Frame;
 use {defmt_rtt as _, panic_probe as _};
 
 use picobell::tasks::run_bell_task;
-use picobell::{cc1101, common, leds, pio_honeywell};
+use picobell::{cc1101, leds, pio_honeywell, setup};
 
 mod config;
 
@@ -50,22 +45,23 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn rf_task(r: RfRessources, mut pio: PIO0, spi: SPI0) {
-    let Pio { common, sm0, .. } = Pio::new(&mut pio, IrqsPio0);
+async fn rf_task(r: RfRessources, pio: PIO0, spi: SPI0) {
+    let rx_trigger_sender = RX_TRIGGER_WATCH.sender();
 
-    let mut honeywell = PioHoneywell::new(common, sm0, r.gdo0, r.gdo2);
-
-    let mut spi_config = spi::Config::default();
-    spi_config.frequency = 8_000_000;
-
-    let spi = Spi::new_blocking(spi, r.clk, r.mosi, r.miso, spi_config);
-    let mut radio = Cc1101::new(spi, r.csn);
-
-    common::setup_radio(&mut radio, config::FREQENCY_OFFSET);
+    let (mut radio, mut honeywell) = setup::setup_radio(
+        config::FREQENCY_OFFSET,
+        spi,
+        r.clk,
+        r.mosi,
+        r.miso,
+        r.csn,
+        pio,
+        IrqsPio0,
+        r.gdo2,
+        r.gdo0,
+    );
 
     info!("RF task started");
-
-    let rx_trigger_sender = RX_TRIGGER_WATCH.sender();
 
     let mut repetitions = 0u8;
     let mut current_frame = None;
@@ -126,21 +122,23 @@ async fn bell_task(r: BellResources) {
 
 #[embassy_executor::task]
 async fn leds_task(r: LedsResources, pio: PIO1, dma: DMA_CH1) {
-    let Pio {
-        mut common, sm0, ..
-    } = Pio::new(pio, IrqsPio1);
-    let mut leds: Leds<'_, PIO1, 0, { config::LED_COUNT }> =
-        Leds::new(config::LED_CONFIG, &mut common, sm0, dma, r.pin);
-
     let mut rx_receiver = unwrap!(RX_TRIGGER_WATCH.receiver());
+
+    let mut leds = setup::setup_leds::<'_, _, { config::LED_COUNT }>(
+        config::LED_CONFIG,
+        pio,
+        IrqsPio1,
+        dma,
+        r.pin,
+    );
 
     info!("Leds task started");
 
-    let mut mode = LedMode::Idle;
+    let mut mode = leds::Mode::Idle;
 
     loop {
         match select(rx_receiver.changed(), leds.show(mode)).await {
-            Either::First(frame) => mode = LedMode::Frame(frame),
+            Either::First(frame) => mode = leds::Mode::Frame(frame),
             Either::Second(_) => defmt::unreachable!("leds.show() future should never resolve!"),
         }
     }

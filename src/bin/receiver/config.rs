@@ -7,10 +7,14 @@ use picobell::{bell, leds};
 use smart_leds::colors;
 
 /// Device ID to receive packets from
+///
+/// Use 0x0 to accept all IDs
 pub const RECEIVE_ID: u20 = u20::new(0x0affe);
 
 /// Frequency offset to compensate inaccuracies of the cc1101's crystal
-pub const FREQENCY_OFFSET: i64 = 89_000; // +/- 202_000Hz
+///
+/// Range is +/- 202_000Hz
+pub const FREQENCY_OFFSET: i64 = 89_000;
 
 /// Delay after which button can be pressed or packet can be received again
 pub const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
